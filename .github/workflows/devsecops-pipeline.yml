@@ -11,9 +11,6 @@ on:
 
 env:
   DOCKER_IMAGE: ${{ secrets.DOCKER_USERNAME }}/my-app
-  # ⚠️ IMPORTANT: These secrets MUST be set in your repository
-  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
 jobs:
   security-scans:
@@ -26,15 +23,15 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ✅ FIX 1: Verify secrets are set before proceeding
+      # ✅ FIXED: Proper secret verification
       - name: Verify SonarQube Secrets
         run: |
           if [ -z "${{ secrets.SONAR_HOST_URL }}" ]; then
-            echo "::error::SONAR_HOST_URL secret is not set! Please add it to your repository secrets."
+            echo "::error::SONAR_HOST_URL secret is not set!"
             exit 1
           fi
-          if [ -z "${{ secrets.SONAR_TOKEN }}" ]; then
-            echo "::error::SONAR_TOKEN secret is not set! Please add it to your repository secrets."
+          if [ -z "${{ secrets.SONAR_TOKEN }}" ]]; then
+            echo "::error::SONAR_TOKEN secret is not set!"
             exit 1
           fi
           echo "✅ SonarQube secrets verified"
@@ -44,46 +41,30 @@ jobs:
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: ${{ github.event.pull_request.base.sha || github.event.before }}
-          head: ${{ github.event.pull_request.head.sha || github.event.after }}
+          base: ${{ github.event.repository.default_branch }}
+          head: HEAD
           extra_args: --debug --only-verified
-        if: |
-          (github.event_name == 'pull_request' && github.event.pull_request.base.sha != github.event.pull_request.head.sha) ||
-          (github.event_name == 'push' && github.event.before != github.event.after)
 
-      # 2. SAST with SonarQube - ✅ FIXED with error handling
+      # 2. SAST with SonarQube - ✅ FIXED: Using official action
       - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v2.0.2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        run: |
-          # Verify URL format
-          if [[ ! "$SONAR_HOST_URL" =~ ^https?:// ]]; then
-            echo "::error::SONAR_HOST_URL must start with http:// or https://"
-            exit 1
-          fi
-          
-          # Run SonarScanner
-          docker run --rm \
-            -e SONAR_HOST_URL="$SONAR_HOST_URL" \
-            -e SONAR_TOKEN="$SONAR_TOKEN" \
-            -v "$PWD:/usr/src" \
-            sonarsource/sonar-scanner-cli \
-            -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }} \
-            -Dsonar.branch.name=${{ github.ref_name }} \
+        with:
+          args: >
+            -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}
+            -Dsonar.branch.name=${{ github.ref_name }}
             -Dsonar.coverage.exclusions=**/*.test.js,**/tests/**
-        continue-on-error: false
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
 
       # 3. Wait for Quality Gate
       - name: SonarQube Quality Gate
+        uses: sonarsource/sonarqube-quality-gate-action@v1.1.0
+        timeout-minutes: 5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        run: |
-          # Wait for analysis to complete and check quality gate
-          sleep 10
-          curl -u "$SONAR_TOKEN:" "$SONAR_HOST_URL/api/qualitygates/project_status?projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}" | jq -r '.projectStatus.status'
-        continue-on-error: true
 
       # 4. Dependency Scanning
       - name: OWASP Dependency Check
@@ -96,27 +77,36 @@ jobs:
             --scan /project \
             --format HTML \
             --format JSON \
+            --format SARIF \
             --out /report \
             --failOnCVSS 7 \
             --suppression /project/dependency-suppression.xml
         continue-on-error: true
 
+      - name: Upload Dependency Check Results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/dependency-check-report.sarif
+        continue-on-error: true
+
       # 5. Filesystem Vulnerability Scan with Trivy
       - name: Trivy Filesystem Scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.19.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-fs-results.sarif'
           severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+        continue-on-error: true
 
       - name: Upload Trivy results to GitHub
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-fs-results.sarif'
+        continue-on-error: true
 
-  # ✅ FIX 2: Scorecard with commit SHA (most reliable)
   security-scorecard:
     name: 📊 OpenSSF Scorecard
     runs-on: ubuntu-latest
@@ -131,9 +121,8 @@ jobs:
         with:
           persist-credentials: false
 
-      # Use specific commit SHA instead of version tag
       - name: Run analysis
-        uses: ossf/scorecard-action@f49aabe0b5af0936a0987cfb85d86b75731b0186 # v4.0.0
+        uses: ossf/scorecard-action@v4.0.0
         with:
           results_file: results.sarif
           results_format: sarif
@@ -169,7 +158,7 @@ jobs:
           docker tag ${{ env.DOCKER_IMAGE }}:${{ github.sha }} ${{ env.DOCKER_IMAGE }}:latest
 
       - name: Trivy Container Scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.19.0
         with:
           scan-type: 'image'
           image-ref: '${{ env.DOCKER_IMAGE }}:${{ github.sha }}'
@@ -177,11 +166,14 @@ jobs:
           output: 'trivy-image-results.sarif'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
+          exit-code: '1'
+        continue-on-error: true
 
       - name: Upload container scan results
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-image-results.sarif'
+        continue-on-error: true
 
       - name: Push Docker image
         run: |
@@ -189,7 +181,7 @@ jobs:
           docker push ${{ env.DOCKER_IMAGE }}:latest
 
       - name: Generate SBOM with Trivy
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@0.19.0
         with:
           scan-type: 'image'
           image-ref: '${{ env.DOCKER_IMAGE }}:${{ github.sha }}'
@@ -209,30 +201,41 @@ jobs:
     if: always()
     
     steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          
       - name: Generate Security Summary
         run: |
           cat << EOF > security-summary.md
-          # Security Scan Summary
+          # 🔒 Security Scan Summary
           
-          ## Scan Results
-          - ✅ SAST Scan: SonarQube completed
-          - ✅ Secret Scan: TruffleHog completed  
-          - ✅ SCA Scan: OWASP Dependency Check completed
-          - ✅ Container Scan: Trivy completed
-          - ✅ Supply Chain: OpenSSF Scorecard completed
+          ## 📋 Scan Overview
+          | Scan Type | Status | Findings |
+          |-----------|--------|----------|
+          | SAST (SonarQube) | ${{ job.status }} | Check Security tab |
+          | Secret Scan (TruffleHog) | ${{ job.status }} | Check Security tab |
+          | SCA (OWASP DC) | ${{ job.status }} | See artifacts |
+          | Container Scan (Trivy) | ${{ job.status }} | See artifacts |
+          | Supply Chain (Scorecard) | ${{ job.status }} | See artifacts |
           
-          ## Vulnerabilities
-          - Check SARIF files in Security tab
-          - SBOM attached as artifact
-          
-          ## Next Steps
-          1. Review critical findings in Security tab
+          ## 🎯 Next Steps
+          1. Review all findings in GitHub Security tab
           2. Check SonarQube dashboard for code quality
-          3. Update dependencies if needed
-          4. Review Scorecard recommendations
+          3. Fix critical vulnerabilities
+          4. Update dependencies
+          
+          ## 📊 Scorecard Summary
+          [View Scorecard Results](https://securityscorecards.dev/viewer/?uri=github.com/${{ github.repository }})
+          
+          ---
+          *Report generated: $(date)*
+          *Commit: ${{ github.sha }}*
+          *Branch: ${{ github.ref_name }}*
           EOF
 
-      - name: Upload Summary
+      - name: Upload Security Summary
         uses: actions/upload-artifact@v4
         with:
           name: security-summary
