@@ -1,0 +1,12 @@
+# .trivyignore - False positives or accepted risks
+
+# Example: Ignore specific CVE in specific package
+CVE-2023-12345:
+  - package: example-package
+    path: /usr/local/lib/example-package
+    statement: "This vulnerability requires local access which we don't have"
+
+# Ignore by expiry date
+CVE-2024-56789:
+  expiry: 2024-12-31
+  statement: "Waiting for vendor patch"

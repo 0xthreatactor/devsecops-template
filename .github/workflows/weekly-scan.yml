@@ -1,0 +1,57 @@
+name: Weekly Security Deep Scan
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Every Monday at 3 AM
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  comprehensive-scan:
+    name: 🔬 Comprehensive Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Full SAST analysis
+      - name: SonarQube Full Analysis
+        uses: sonarsource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=${{ github.repository_owner }}_${{ github.event.repository.name }}
+            -Dsonar.branch.name=main
+            -Dsonar.scanner.exclusions.test=true
+
+      # Dependency scanning with historical analysis
+      - name: Deep SCA Analysis
+        run: |
+          docker run --rm \
+            -v $PWD:/project \
+            owasp/dependency-check:latest \
+            --scan /project \
+            --format ALL \
+            --out /project/reports/deep-scan \
+            --enableExperimental \
+            --suppression /project/dependency-suppression.xml
+
+      # Full container scan
+      - name: Build and scan image
+        run: |
+          docker build -t app:scan .
+          trivy image --severity HIGH,CRITICAL --no-progress --light app:scan
+          trivy image --severity MEDIUM --ignore-unfixed --light app:scan
+
+      # Upload all reports
+      - name: Upload scan results
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-security-report
+          path: |
+            reports/
+            trivy-results/
+          retention-days: 90

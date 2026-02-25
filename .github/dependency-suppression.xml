@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+    
+    <!-- Suppress false positives -->
+    <suppress>
+        <notes><![CDATA[
+        False positive for internal library
+        ]]></notes>
+        <cve>CVE-2023-1234</cve>
+    </suppress>
+    
+    <!-- Suppress by file path -->
+    <suppress>
+        <notes><![CDATA[
+        Test files only
+        ]]></notes>
+        <filePath regex="true">.*/test/.*</filePath>
+        <cve>CVE-2024-5678</cve>
+    </suppress>
+    
+    <!-- Suppress by CVSS score threshold -->
+    <suppress>
+        <notes><![CDATA[
+        Low severity issues in dev dependencies
+        ]]></notes>
+        <cvssBelow>4.0</cvssBelow>
+    </suppress>
+</suppressions>

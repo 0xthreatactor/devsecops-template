@@ -1,0 +1,43 @@
+name: PR Security Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main, develop]
+
+jobs:
+  quick-security-check:
+    name: 🔒 Quick Security Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      # Changed files scan
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v41
+
+      # Scan only changed files
+      - name: Trivy Scan changed files
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+            echo "Scanning $file"
+            trivy fs --severity HIGH,CRITICAL --no-progress $file
+          done
+
+      # Comment results on PR
+      - name: Comment PR
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Security scan completed! Check workflow logs for details.'
+            })

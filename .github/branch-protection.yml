@@ -1,0 +1,39 @@
+name: Branch Protection
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  enforce-protection:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check branch protection
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const rules = {
+              required_status_checks: {
+                strict: true,
+                contexts: [
+                  'security-scans',
+                  'SonarQube Quality Gate',
+                  'Trivy Filesystem Scan'
+                ]
+              },
+              enforce_admins: true,
+              required_pull_request_reviews: {
+                required_approving_review_count: 2,
+                dismiss_stale_reviews: true,
+                require_code_owner_reviews: true
+              },
+              restrictions: null
+            };
+            
+            // Apply rules
+            await github.rest.repos.updateBranchProtection({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: 'main',
+              ...rules
+            });

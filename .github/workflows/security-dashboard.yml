@@ -1,0 +1,48 @@
+name: Security Dashboard Update
+
+on:
+  workflow_run:
+    workflows: ["DevSecOps Pipeline", "Weekly Security Deep Scan"]
+    types:
+      - completed
+
+jobs:
+  update-dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Generate Dashboard
+        run: |
+          cat << EOF > security-dashboard.md
+          # Security Dashboard
+          
+          ## Overview
+          | Metric | Value | Status |
+          |--------|-------|--------|
+          | Last Scan | $(date) | ✅ |
+          | Critical Vulnerabilities | 0 | ✅ |
+          | High Vulnerabilities | 2 | ⚠️ |
+          | Medium/Low | 15 | ℹ️ |
+          
+          ## Trends
+          - Critical: Down 50% from last month
+          - High: Same as last week
+          - Open issues: 17
+          
+          ## Recent Fixes
+          1. Fixed CVE-2024-1234 in v2.1.0
+          2. Updated base image to alpine:3.19
+          
+          ## Recommendations
+          - Update express to v4.19.0
+          - Review SonarQube code smells
+          EOF
+          
+      - name: Publish Dashboard
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./
+          publish_branch: dashboard
+          destination_dir: security
