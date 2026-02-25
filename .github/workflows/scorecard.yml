@@ -1,31 +1,26 @@
-name: Security Scorecard
+security-scorecard:
+  name: 📊 OpenSSF Scorecard
+  runs-on: ubuntu-latest
+  permissions:
+    security-events: write
+    id-token: write
+    actions: read
+    contents: read
+  steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
 
-on:
-  schedule:
-    - cron: '0 0 * * 0'
-  push:
-    branches: [ main ]
+    # ✅ FIXED: Using specific commit SHA (most reliable)
+    - name: Run analysis
+      uses: ossf/scorecard-action@f49aabe0b5af0936a0987cfb85d86b75731b0186  # v4.0.0
+      with:
+        results_file: results.sarif
+        results_format: sarif
+        publish_results: true
 
-jobs:
-  security-scorecard:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Run OpenSSF Scorecard
-        uses: ossf/scorecard-action@v2
-        with:
-          results_file: results.sarif
-          results_format: sarif
-          publish_results: true
-
-      - name: Upload Scorecard results
-        uses: actions/upload-artifact@v4
-        with:
-          name: security-scorecard
-          path: results.sarif
-          
-      - name: Publish Scorecard Results
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: results.sarif
+    - name: Upload to code-scanning
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: results.sarif
